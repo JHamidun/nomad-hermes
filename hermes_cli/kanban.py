@@ -311,8 +311,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 def _cmd_heartbeat(args: argparse.Namespace) -> int:
     with kbc.connect_closing() as conn:
-        ok = kbd.heartbeat_worker(conn, args.task_id, note=getattr(args, "note", None),
-                                 expected_run_id=_worker_run_id_for(args.task_id))
+        ok = kbd.heartbeat_worker(
+            conn,
+            args.task_id,
+            note=getattr(args, "note", None),
+            expected_run_id=_worker_run_id_for(args.task_id),
+            ttl_seconds=getattr(args, "ttl", None),
+            claimer=getattr(args, "claimer", None),
+        )
     return _ok_or_err(ok, f"cannot heartbeat {args.task_id} (not running?)",
                       f"Heartbeat recorded for {args.task_id}")
 

@@ -420,7 +420,9 @@ _SPECS = [
     _cmd("heartbeat", [
         _TASK_ID,
         _arg("--note", help="Optional short note attached to the heartbeat event"),
-    ], help="Emit a heartbeat event for a running task (worker liveness signal)"),
+        _arg("--ttl", type=int, default=None, help="Extend claim TTL by N seconds (default: claim TTL for external claims)"),
+        _arg("--claimer", default=None, help="Explicit claim_lock owner when renewing an external claim"),
+    ], help="Emit a heartbeat event and renew the claim lease for a running task"),
     _cmd("assignees", [_json_flag()],
          help="List known profiles + per-profile task counts (union of ~/.hermes/profiles/ and current assignees on the board)"),
     _cmd("context", [_TASK_ID],
