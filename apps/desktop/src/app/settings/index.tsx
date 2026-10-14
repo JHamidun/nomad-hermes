@@ -86,6 +86,10 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'about'
 ]
 
+export function isNousBillingProvider(provider?: string | null): boolean {
+  return String(provider ?? '').trim().toLowerCase() === 'nous'
+}
+
 // Pages that take nothing but the resolved sub-page.
 const SUBPAGE_VIEWS: Partial<Record<SettingsViewId, ComponentType<{ subpage?: string }>>> = {
   'config:appearance': AppearanceSettings,
@@ -280,33 +284,37 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
             label: t.settings.nav.notifications,
             onSelect: () => setActiveView('notifications')
           },
-          {
-            active: activeView === 'billing',
-            children: [
-              {
-                active: activeView === 'billing' && (billingView === 'overview' || !canViewPlans),
-                icon: BarChart3,
-                id: 'bview:overview',
-                label: t.settings.subpages.billingOverview,
-                onSelect: () => openSubView('billing', 'bview', 'overview', 'overview')
-              },
-              ...(canViewPlans
-                ? [
+          ...(isNousBillingProvider(subscriptionState.data?.provider ?? (billingPresentation.status === 'normal' ? 'nous' : ''))
+            ? [
+                {
+                  active: activeView === 'billing',
+                  children: [
                     {
-                      active: activeView === 'billing' && billingView === 'plans',
+                      active: activeView === 'billing' && (billingView === 'overview' || !canViewPlans),
                       icon: BarChart3,
-                      id: 'bview:plans',
-                      label: t.settings.subpages.billingPlans,
-                      onSelect: () => openSubView('billing', 'bview', 'plans', 'overview')
-                    }
-                  ]
-                : [])
-            ],
-            icon: BarChart3,
-            id: 'billing',
-            label: t.settings.nav.billing,
-            onSelect: () => setActiveView('billing')
-          },
+                      id: 'bview:overview',
+                      label: t.settings.subpages.billingOverview,
+                      onSelect: () => openSubView('billing', 'bview', 'overview', 'overview')
+                    },
+                    ...(canViewPlans
+                      ? [
+                          {
+                            active: activeView === 'billing' && billingView === 'plans',
+                            icon: BarChart3,
+                            id: 'bview:plans',
+                            label: t.settings.subpages.billingPlans,
+                            onSelect: () => openSubView('billing', 'bview', 'plans', 'overview')
+                          }
+                        ]
+                      : [])
+                  ],
+                  icon: BarChart3,
+                  id: 'billing' as SettingsViewId,
+                  label: t.settings.nav.billing,
+                  onSelect: () => setActiveView('billing')
+                }
+              ]
+            : []),
           {
             active: activeView === 'providers',
             children: [
