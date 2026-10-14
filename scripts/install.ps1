@@ -71,7 +71,11 @@ $script:BoundParams = $PSBoundParameters
 # Under iex, script scope is the caller's session and outlives a run; start
 # each run without the previous run's answer (see Set-LauncherUserPath).
 $script:BinDirOnCallerPath = $null
-$RepoUrl = if ($env:HERMES_REPO_URL) { $env:HERMES_REPO_URL } else { "https://github.com/NousResearch/hermes-agent.git" }
+$RepoUrl = if ($env:HERMES_REPO_URL) { $env:HERMES_REPO_URL } else { "https://github.com/JHamidun/nomad-hermes.git" }
+$RepoUrlHttps = "https://github.com/JHamidun/nomad-hermes.git"
+$RepoWebUrl = "https://github.com/JHamidun/nomad-hermes"
+$RepoZipMainUrl = "https://github.com/JHamidun/nomad-hermes/archive/refs/heads/main.zip"
+$RepoZipTagUrl = "https://github.com/JHamidun/nomad-hermes/archive/refs/tags/$Tag.zip"
 
 # --- BEGIN GENERATED: bootstrap pins (scripts/gen-bootstrap-pins.py) ---
 # Derived from pm/lock.json. DO NOT EDIT BY HAND:
