@@ -101,6 +101,7 @@ def decompose_triage_task(
     """
     from hermes_cli.kanban_db import (
         _canonical_assignee, _link, _append_event, _insert_comment,
+        _ancestor_depth, _descendant_height, configured_max_depth,
         write_txn, recompute_ready,
     )
 
@@ -109,6 +110,19 @@ def decompose_triage_task(
     if root_assignee is not None:
         root_assignee = _canonical_assignee(root_assignee)
     _validate_children_graph(children)
+
+    # Longest sibling chain inside ``children`` (1 when no sibling edges exist).
+    child_depths = [1] * len(children)
+    for _ in range(len(children)):
+        changed = False
+        for idx, child in enumerate(children):
+            for p_idx in child.get("parents") or []:
+                if child_depths[p_idx] + 1 > child_depths[idx]:
+                    child_depths[idx] = child_depths[p_idx] + 1
+                    changed = True
+        if not changed:
+            break
+    max_sibling_depth = max(child_depths, default=1)
 
     # ONE txn so the fan-out is atomic; helpers that open their own write_txn
     # (create_task, link_tasks, add_comment) must not be called in here.
@@ -127,6 +141,18 @@ def decompose_triage_task(
             (task_id,),
         ).fetchone():
             return None
+        limit = configured_max_depth()
+        if limit is not None and limit >= 1:
+            resulting_depth = (
+                _ancestor_depth(conn, task_id)
+                + max_sibling_depth
+                + _descendant_height(conn, task_id)
+            )
+            if resulting_depth > limit:
+                raise ValueError(
+                    f"kanban.max_depth ({limit}) exceeded: decomposition depth "
+                    f"{resulting_depth} > {limit}"
+                )
         child_ids = [
             _insert_decomposed_child(conn, task_id, root_row, child, author, now)
             for child in children

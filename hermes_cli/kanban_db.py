@@ -1275,6 +1275,7 @@ def create_task(
             # commit so the dispatcher never sees a half-built graph.
             with write_txn(conn, allow_nested=True):
                 task_status, tenant = initial_task_state(conn, parents, initial_status, triage, tenant)
+                _assert_max_depth_for_parents(conn, parents)
                 # Project worktree: fresh dir under the repo + deterministic
                 # branch, instead of the random ``wt/<id>`` worker fallback.
                 if project_obj is not None and workspace_kind == "worktree":
@@ -1589,6 +1590,7 @@ def link_tasks(
             raise ValueError(f"cannot link {parent_id} -> {child_id}: child is already running")
         if _would_cycle(conn, parent_id, child_id):
             raise ValueError(f"linking {parent_id} -> {child_id} would create a cycle")
+        _assert_max_depth_for_link(conn, parent_id, child_id)
         _link(conn, parent_id, child_id)
         # If child was ready but parent is not yet terminal, demote child to todo
         # (archived counts as terminal, matching _parents_satisfied/recompute_ready).
@@ -1613,6 +1615,116 @@ def link_tasks(
         )
         _inherit_notify_subs(conn, child_id, (parent_id,))
     return gated
+
+
+def configured_max_depth() -> Optional[int]:
+    """Read ``kanban.max_depth`` from config, or None when unset/non-positive."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        raw = (load_config_readonly() or {}).get("kanban", {}).get("max_depth")
+    except Exception:
+        return None
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        ival = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return ival if ival >= 1 else None
+
+
+def _ancestor_depth(
+    conn: sqlite3.Connection, task_id: str,
+    memo: Optional[dict[str, int]] = None,
+    visiting: Optional[ set[str] ] = None,
+) -> int:
+    """Longest ancestor chain length ending at ``task_id`` (0 for a root task)."""
+    if memo is None:
+        memo = {}
+    if task_id in memo:
+        return memo[task_id]
+    if visiting is None:
+        visiting = set()
+    if task_id in visiting:
+        return 0
+    visiting.add(task_id)
+    rows = conn.execute(
+        "SELECT parent_id FROM task_links WHERE child_id = ?", (task_id,)
+    ).fetchall()
+    if not rows:
+        depth = 0
+    else:
+        depth = 1 + max(
+            _ancestor_depth(conn, r["parent_id"], memo, visiting) for r in rows
+        )
+    visiting.discard(task_id)
+    memo[task_id] = depth
+    return depth
+
+
+def _descendant_height(
+    conn: sqlite3.Connection, task_id: str,
+    memo: Optional[dict[str, int]] = None,
+    visiting: Optional[ set[str] ] = None,
+) -> int:
+    """Longest descendant chain length starting at ``task_id`` (0 for a leaf task)."""
+    if memo is None:
+        memo = {}
+    if task_id in memo:
+        return memo[task_id]
+    if visiting is None:
+        visiting = set()
+    if task_id in visiting:
+        return 0
+    visiting.add(task_id)
+    rows = conn.execute(
+        "SELECT child_id FROM task_links WHERE parent_id = ?", (task_id,)
+    ).fetchall()
+    if not rows:
+        height = 0
+    else:
+        height = 1 + max(
+            _descendant_height(conn, r["child_id"], memo, visiting) for r in rows
+        )
+    visiting.discard(task_id)
+    memo[task_id] = height
+    return height
+
+
+def _assert_max_depth_for_parents(
+    conn: sqlite3.Connection, parents: Iterable[str], *,
+    max_depth: Optional[int] = None, extra_depth: int = 0,
+) -> None:
+    """Reject a new child under ``parents`` when the resulting depth exceeds ``kanban.max_depth``."""
+    limit = configured_max_depth() if max_depth is None else max_depth
+    if limit is None or limit < 1:
+        return
+    parent_list = [p for p in parents if p]
+    if not parent_list and extra_depth <= 0:
+        return
+    memo: dict[str, int] = {}
+    parent_depth = max((_ancestor_depth(conn, pid, memo) for pid in parent_list), default=-1)
+    new_depth = parent_depth + 1 + extra_depth
+    if new_depth > limit:
+        raise ValueError(
+            f"kanban.max_depth ({limit}) exceeded: task depth {new_depth} > {limit}"
+        )
+
+
+def _assert_max_depth_for_link(
+    conn: sqlite3.Connection, parent_id: str, child_id: str, *,
+    max_depth: Optional[int] = None,
+) -> None:
+    """Reject ``parent_id -> child_id`` when the combined ancestor+descendant chain exceeds ``kanban.max_depth``."""
+    limit = configured_max_depth() if max_depth is None else max_depth
+    if limit is None or limit < 1:
+        return
+    new_depth = _ancestor_depth(conn, parent_id) + 1 + _descendant_height(conn, child_id)
+    if new_depth > limit:
+        raise ValueError(
+            f"kanban.max_depth ({limit}) exceeded: linking {parent_id} -> {child_id} "
+            f"reaches depth {new_depth} > {limit}"
+        )
 
 
 def _would_cycle(conn: sqlite3.Connection, parent_id: str, child_id: str) -> bool:

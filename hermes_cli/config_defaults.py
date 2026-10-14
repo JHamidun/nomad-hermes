@@ -1936,6 +1936,10 @@ DEFAULT_CONFIG = {
         # root profile named "default", so on a shared kanban.db every home can otherwise claim
         # default-assigned cards.
         "dispatch_profiles": None,
+        # Maximum dependency depth in the task graph (0-indexed: root task = 0, direct child = 1).
+        # Positive integer = reject create_task / link_tasks / decompose_triage_task edges that
+        # would place any task at depth > max_depth. None = no depth cap.
+        "max_depth": None,
         # Auto-run the decomposer on Triage tasks every tick. False = manual via `hermes kanban
         # decompose <id>` or the dashboard's Decompose button.
         "auto_decompose": True,
