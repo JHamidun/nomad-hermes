@@ -45,6 +45,17 @@ def codex_cloudflare_headers(access_token: str, *, base_url: str = CODEX_AUX_BAS
             "User-Agent": f"HermesAgent/{get_version_info().base_version}",
             "originator": "hermes-agent",
         }
+        try:
+            from agent.auxiliary_client import _apply_user_default_headers
+            merged = _apply_user_default_headers({}) or {}
+            if merged.get("User-Agent"):
+                headers["User-Agent"] = merged["User-Agent"]
+            if merged.get("originator"):
+                headers["originator"] = merged["originator"]
+            elif merged.get("X-Title") and merged["X-Title"] != "Hermes Agent":
+                headers["originator"] = f"{merged['X-Title'].lower().replace(' ', '-')}-agent"
+        except Exception:
+            pass
     else:
         headers = {"User-Agent": "codex_cli_rs/0.0.0 (Hermes Agent)", "originator": "codex_cli_rs"}
     headers.update(codex_account_headers(access_token))
