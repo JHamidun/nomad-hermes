@@ -368,11 +368,23 @@ def _beta_header(betas: list) -> dict[str, str]:
 
 
 def _attribution_headers() -> dict[str, str]:
-    """Same client-attribution set sent to OpenRouter / Vercel AI Gateway / Fireworks."""
-    return {
+    """Same client-attribution set sent to OpenRouter / Vercel AI Gateway / Fireworks.
+
+    ``model.default_headers`` wins over these defaults. Every OpenAI-wire route already honours
+    that key through ``auxiliary_client._apply_user_default_headers``; the two routes that reach
+    this helper (the Kimi Anthropic wire and OpenCode) were the only ones it never reached, so a
+    redistribution could re-label its client everywhere except here. Falls back to the defaults if
+    the config is unreadable: attribution must never be the reason a request fails.
+    """
+    base = {
         "HTTP-Referer": "https://hermes-agent.nousresearch.com", "X-Title": "Hermes Agent",
         "User-Agent": f"HermesAgent/{get_version_info().base_version}",
     }
+    try:
+        from agent.auxiliary_client import _apply_user_default_headers
+        return _apply_user_default_headers(base) or base
+    except Exception:
+        return base
 
 
 def _client_timeout(timeout):
