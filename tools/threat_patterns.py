@@ -102,6 +102,13 @@ _PATTERNS: list[tuple[str, str, str]] = [
     (r'(?:api[_-]?key|token|secret|password)\s*[=:]\s*["\']'
      r'(?!(?-i:[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)["\'])'
      r'[A-Za-z0-9+/=_-]{20,}', "hardcoded_secret", "strict"),
+
+    # ── Russian prompt-injection patterns (SAF6) ─────────────────────
+    (r'игнорируй(?:те)?\s+(?:все\s+)?(?:предыдущие|прошлые|верхние|системные)\s+(?:инструкции|правила|указания)', "ru_prompt_injection", "all"),
+    (r'забудь(?:те)?\s+(?:все\s+)?(?:предыдущие|системные|свои)\s+(?:инструкции|правила|ограничения)', "ru_disregard_rules", "all"),
+    (r'(?:переопредели|замени|отмени)\s+системный\s+промпт', "ru_sys_prompt_override", "all"),
+    (r'(?:выведи|покажи|напечатай)\s+(?:полный\s+)?системный\s+промпт', "ru_leak_system_prompt", "context"),
+    (r'перейди\s+в\s+режим\s+(?:разработчика|без\s+ограничений)', "ru_role_hijack", "context"),
 ]
 
 # Invisible / bidirectional unicode used in injection attacks (aligned with skills_guard.py

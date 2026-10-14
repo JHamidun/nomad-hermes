@@ -142,11 +142,12 @@ def _homes_and_resolved(path: str) -> tuple[set[str], str]:
 # ---------------------------------------------------------------------------
 
 def is_nt_namespace_path(path: str) -> bool:
-    """Return True if ``path`` is a Windows NT-/device-namespace path.
+    """Return True if ``path`` is a Windows NT-/device-namespace path or loopback admin share.
 
     Checks the raw string only — never resolves the path (resolving is the
     credential-leak trigger this guard exists to prevent).
     """
+    import re as _re
     s = str(path).replace("/", "\\")
     if s.startswith("\\??\\"):
         return True
@@ -157,6 +158,8 @@ def is_nt_namespace_path(path: str) -> bool:
         upper = rest.upper()
         if upper.startswith("UNC\\") or upper.startswith("GLOBALROOT\\"):
             return True
+    if _re.match(r"^\\\\(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)\\[a-zA-Z]\$(?:\\|$)", s, _re.IGNORECASE):
+        return True
     return False
 
 

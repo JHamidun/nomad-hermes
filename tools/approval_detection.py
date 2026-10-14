@@ -479,6 +479,10 @@ DANGEROUS_PATTERNS = [
     (_CMDPOS + r'yarn\s+' + _PKG_OPTS + r'(?:global\s+)?(?:uninstall|remove)\b', "package manager uninstall"),
     (_CMDPOS + r'pip(?:3)?\s+' + _PKG_OPTS + r'uninstall\b', "package manager uninstall"),
     (_CMDPOS + r'brew\s+' + _PKG_OPTS + r'(?:uninstall|remove|rm)\b', "package manager uninstall"),
+    (_CMDPOS + r'(?:iptables|ip6tables|nft|ufw|wg-quick)\b', "network/firewall configuration change"),
+    (_CMDPOS + r'ip\s+(?:-[^\s]+\s+)*route\s+(?:add|del|delete|replace|change|flush)\b', "network routing table modification"),
+    (_CMDPOS + r'netsh\b[^\n;|&]*\badvfirewall\b', "Windows firewall configuration change (netsh advfirewall)"),
+    (_CMDPOS + r'crontab\s+(?:-[^\s]*r\b|--remove\b)', "remove crontab entries (crontab -r)"),
 ]
 
 
