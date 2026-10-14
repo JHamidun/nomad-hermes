@@ -1,0 +1,9 @@
+{
+  "tag": "v2026.9.14",
+  "status": "green",
+  "platform": "windows-latest",
+  "steps_completed": 14,
+  "built_at": "2026-10-15T00:08:00+03:00",
+  "run_id": "38636703260",
+  "repository": "JHamidun/nomad-hermes"
+}
