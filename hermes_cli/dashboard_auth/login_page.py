@@ -287,7 +287,7 @@ _LOGIN_HTML_TEMPLATE = """\
 </head>
 <body>
 <main>
-  <div class="brand">Nous<span class="dot"></span>Research</div>
+  <div class="brand">{brand_markup}</div>
   <div class="card">
     <h1>Sign in</h1>
     <p class="subtitle">Choose a sign-in method to continue to the Hermes Agent dashboard.</p>
@@ -446,6 +446,32 @@ _PASSWORD_FORM_SCRIPT = """\
 """
 
 
+_DEFAULT_BRAND_MARKUP = 'Nous<span class="dot"></span>Research'
+
+
+def _resolve_brand_markup() -> str:
+    """Return HTML markup for the ``.brand`` header above the login card.
+
+    Reads ``branding.login_brand`` (or ``branding.agent_name``) from user config
+    when configured; falls back to the default ``Nous · Research`` wordmark.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+    except Exception:
+        cfg = {}
+    if isinstance(cfg, dict):
+        branding = cfg.get("branding")
+        if isinstance(branding, dict):
+            custom = str(
+                branding.get("login_brand") or branding.get("agent_name") or ""
+            ).strip()
+            if custom:
+                return html.escape(custom)
+    return _DEFAULT_BRAND_MARKUP
+
+
 def render_login_html(*, next_path: str = "", prefix: str = "") -> str:
     """Return the full HTML for ``GET /login``.
 
@@ -475,6 +501,7 @@ def render_login_html(*, next_path: str = "", prefix: str = "") -> str:
     ]
     needs_password_script = any(getattr(p, "supports_password", False) for p in providers)
     html_out = _LOGIN_HTML_TEMPLATE.format(
+        brand_markup=_resolve_brand_markup(),
         provider_buttons="\n".join(buttons),
         password_script=_PASSWORD_FORM_SCRIPT if needs_password_script else "",
     )
@@ -528,7 +555,9 @@ def render_native_provider_choice_html(
         return _EMPTY_HTML
     return _apply_proxy_prefix(
         _LOGIN_HTML_TEMPLATE.format(
-            provider_buttons="\n".join(buttons), password_script=""),
+            brand_markup=_resolve_brand_markup(),
+            provider_buttons="\n".join(buttons),
+            password_script=""),
         prefix)
 
 
