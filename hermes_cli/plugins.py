@@ -155,6 +155,10 @@ VALID_HOOKS: set[str] = {
     # provider, model, language, prompt, source. Return None or a dict mutating prompt/language/
     # model (registration order, last-writer-wins; file_path is read-only).
     "pre_transcription",
+    # pre_kanban_task_create: pre-commit admission hook fired in kanban_db.create_task BEFORE opening
+    # the SQLite write transaction. Return {"action": "veto", "reason": "..."} (or {"veto": True}) to
+    # reject creation with KanbanTaskCreateVetoed (PermissionError) before any row is inserted.
+    "pre_kanban_task_create",
     # Kanban task observers (hermes_cli.kanban_db), fired AFTER the DB commit so a slow plugin never
     # holds the SQLite write lock; returns ignored. claimed fires in the DISPATCHER right before
     # spawn; completed/blocked fire in the WORKER (or whichever process drove it). Kwargs: task_id,
