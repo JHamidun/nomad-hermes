@@ -67,7 +67,8 @@ def get_cached_entry(server_name: str, fingerprint: str) -> Optional[dict]:
         return None
     ttl_ms = entry.get("ttl_ms")
     written_at = entry.get("written_at")
-    expired = (isinstance(ttl_ms, (int, float)) and isinstance(written_at, (int, float))
+    expired = (isinstance(ttl_ms, (int, float)) and not isinstance(ttl_ms, bool) and ttl_ms > 0
+               and isinstance(written_at, (int, float))
                and (time.time() - written_at) * 1000.0 >= float(ttl_ms))
     return None if expired else entry
 
@@ -76,9 +77,11 @@ def write_cache_entry(server_name: str, fingerprint: str, *, tools: list[dict],
                       utility_tools: Optional[list[dict]] = None, ttl_ms: Optional[float] = None,
                       cache_scope: Optional[str] = None) -> None:
     """Persist tool schemas after a successful live connect. ``ttl_ms`` / ``cache_scope`` are
-    the server's ``tools/list`` SEP-2549 hints; ``written_at`` anchors TTL expiry."""
+    the server's ``tools/list`` SEP-2549 hints; ``written_at`` anchors TTL expiry. A zero or
+    negative ``ttl_ms`` (the Pydantic default on ``mcp.types.ListToolsResult`` when a server
+    omits ``ttlMs``) is treated as 'no TTL' so cached manifests survive across restarts."""
     entry = {"fingerprint": fingerprint, "tools": tools, "utility_tools": utility_tools or []}
-    if isinstance(ttl_ms, (int, float)):
+    if isinstance(ttl_ms, (int, float)) and not isinstance(ttl_ms, bool) and ttl_ms > 0:
         entry["ttl_ms"] = ttl_ms
         entry["written_at"] = time.time()
     if cache_scope:
