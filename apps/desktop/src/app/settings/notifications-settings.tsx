@@ -53,7 +53,7 @@ export function NotificationsSettings({ subpage }: NotificationsSettingsProps = 
     <SettingsContent>
       {showAlerts && (
         <>
-          {subpage === undefined && <SectionHeading icon={Bell} title={copy.title} />}
+          {subpage === undefined && <SectionHeading help={copy.intro} icon={Bell} title={copy.title} />}
           <Caption className="mb-2 leading-(--conversation-caption-line-height)">{copy.intro}</Caption>
 
           <ToggleRow

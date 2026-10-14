@@ -468,6 +468,7 @@ function ConfigSettingsInner({
               />
             }
             description={c.keepAwakeDesc}
+            help={c.keepAwakeDesc}
             id={settingElementId(SETTING_IDS.advanced.keepAwake)}
             title={c.keepAwakeTitle}
           />

@@ -7,6 +7,7 @@ import { ArchiveSkillConfirmDialog } from '@/app/learning/archive-skill-confirm-
 import { CodeEditor } from '@/components/chat/code-editor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HelpTip } from '@/components/ui/help-tip'
 import {
   editLearningNode,
   getLearningNode,
@@ -319,8 +320,9 @@ export function SkillsTab({ onRefresh, profile, query, skills }: SkillsTabProps)
               />
             ))}
             {visibleOfficial.length > 0 && (
-              <div className="flex h-7 shrink-0 items-end px-2 pb-1 text-[0.62rem] font-medium uppercase tracking-wide text-(--ui-text-quaternary)">
-                {t.skills.officialCatalog}
+              <div className="flex h-7 shrink-0 items-end gap-1.5 px-2 pb-1 text-[0.62rem] font-medium uppercase tracking-wide text-(--ui-text-quaternary)">
+                <span>{t.skills.officialCatalog}</span>
+                <HelpTip align="start" side="bottom" text={t.skills.changesApplyNewSessions} />
               </div>
             )}
             {visibleOfficial.map(skill => {

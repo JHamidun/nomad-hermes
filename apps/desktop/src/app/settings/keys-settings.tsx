@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { HelpTip } from '@/components/ui/help-tip'
 import { useI18n } from '@/i18n'
 import { $settingsRequestProfile } from '@/store/settings-scope'
 
@@ -83,7 +84,10 @@ export function KeysSettings({ view }: KeysSettingsProps) {
 
   return (
     <SettingsContent>
-      <SettingsProfileScope className="mb-5" />
+      <div className="mb-5 flex items-center justify-between gap-2">
+        <SettingsProfileScope />
+        <HelpTip text={t.settings.credentials?.intro} />
+      </div>
       {entries.length > 0 ? (
         <div className="grid gap-2">
           {entries.map(([key, info]) => {

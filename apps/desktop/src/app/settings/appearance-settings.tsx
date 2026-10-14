@@ -553,7 +553,7 @@ export function AppearanceSettings({ subpage }: AppearanceSettingsProps = {}) {
       <div>
         {subpage === undefined && (
           <>
-            <SectionHeading icon={Palette} title={a.title} />
+            <SectionHeading help={a.intro} icon={Palette} title={a.title} />
             <p className="max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
               {a.intro}
             </p>

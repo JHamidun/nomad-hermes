@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
+import { HelpTip } from '@/components/ui/help-tip'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { getGlobalModelOptions } from '@/hermes'
@@ -895,7 +896,10 @@ export function ApiKeyForm({
 
       <div className="grid scroll-mt-4 gap-2" ref={entryRef}>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm leading-6 text-muted-foreground">{optionDescription}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm leading-6 text-muted-foreground">{optionDescription}</p>
+            <HelpTip align="end" side="top" text={optionDescription} title={option.name} />
+          </div>
           {option.docsUrl ? <DocsLink href={option.docsUrl}>{t.onboarding.getKey}</DocsLink> : null}
         </div>
         <Input

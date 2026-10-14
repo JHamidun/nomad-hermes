@@ -9,6 +9,7 @@ import { isElementInHiddenPane } from '@/components/pane-shell/pane-visibility'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
+import { HelpTip } from '@/components/ui/help-tip'
 import { releaseTypingFocus } from '@/components/ui/keyboard-first'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
@@ -47,13 +48,16 @@ const PILL = cn(
 export function ModelPill({
   compact = false,
   disabled,
+  help,
   model
 }: {
   compact?: boolean
   disabled: boolean
+  help?: string
   model: ChatBarState['model']
 }) {
   const copy = useI18n().t.shell.statusbar
+  const helpNode = help ? <HelpTip side="top" text={help} /> : null
   // Two return branches below, one handle: only ever one of them mounts.
   const tourMarker = useTourMarker('model-pill')
   const view = useSessionView()
@@ -177,19 +181,22 @@ export function ModelPill({
 
   if (!model.modelMenuContent) {
     return (
-      <Tip label={pinnedOverride ? `${copy.openModelPicker} — ${copy.modelPinned}` : copy.openModelPicker} side="top">
-        <Button
-          aria-label={copy.openModelPicker}
-          className={pillClass}
-          data-tour={tourMarker}
-          disabled={disabled}
-          onClick={() => setModelPickerOpen(true)}
-          type="button"
-          variant="ghost"
-        >
-          {label}
-        </Button>
-      </Tip>
+      <>
+        <Tip label={pinnedOverride ? `${copy.openModelPicker} — ${copy.modelPinned}` : copy.openModelPicker} side="top">
+          <Button
+            aria-label={copy.openModelPicker}
+            className={pillClass}
+            data-tour={tourMarker}
+            disabled={disabled}
+            onClick={() => setModelPickerOpen(true)}
+            type="button"
+            variant="ghost"
+          >
+            {label}
+          </Button>
+        </Tip>
+        {helpNode}
+      </>
     )
   }
 

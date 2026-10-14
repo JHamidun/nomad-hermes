@@ -6,6 +6,7 @@ import { RemoteSetupFields } from '@/components/remote-setup/fields'
 import { useRemoteSetup } from '@/components/remote-setup/use-remote-setup'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { HelpTip } from '@/components/ui/help-tip'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tip } from '@/components/ui/tooltip'
@@ -1061,6 +1062,7 @@ function GatewayConnectionSettings({ embedded, standalone }: { embedded: boolean
           <div className="flex items-center gap-2 text-[length:var(--conversation-text-font-size)] font-medium">
             <Globe className="size-4 text-muted-foreground" />
             {g.title}
+            <HelpTip text={g.intro} title={g.title} />
             {state.envOverride ? <Pill tone="primary">{g.envOverride}</Pill> : null}
           </div>
           <p className="mt-2 max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">

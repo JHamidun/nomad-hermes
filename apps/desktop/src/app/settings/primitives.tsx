@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HelpTip } from '@/components/ui/help-tip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { triggerHaptic } from '@/lib/haptics'
@@ -52,6 +53,7 @@ export function Pill({
 
 export function SectionHeading({
   aside,
+  help,
   icon: Icon,
   meta,
   page = false,
@@ -60,6 +62,7 @@ export function SectionHeading({
   // Right-aligned trailing content on the heading row (e.g. a compact status +
   // action), so a single-item section needn't repeat its own label as a row.
   aside?: ReactNode
+  help?: ReactNode
   icon: IconComponent
   meta?: string
   page?: boolean
@@ -78,6 +81,7 @@ export function SectionHeading({
         <>
           <Icon className="size-4 shrink-0 text-muted-foreground" />
           <span>{title}</span>
+          {help ? <HelpTip text={help} title={title} /> : null}
         </>
       )}
       {meta && <Pill>{meta}</Pill>}
@@ -92,19 +96,21 @@ export function SectionHeading({
 export function SettingsSection({
   aside,
   children,
+  help,
   icon,
   meta,
   title
 }: {
   aside?: ReactNode
   children: ReactNode
+  help?: ReactNode
   icon: IconComponent
   meta?: string
   title: string
 }) {
   return (
     <section className="mb-6">
-      <SectionHeading aside={aside} icon={icon} meta={meta} title={title} />
+      <SectionHeading aside={aside} help={help} icon={icon} meta={meta} title={title} />
       {children}
     </section>
   )
@@ -153,6 +159,7 @@ export const LIST_ROW_COLUMNS = '@2xl:grid-cols-[minmax(0,1fr)_minmax(15rem,22re
 export function ListRow({
   title,
   description,
+  help,
   hint,
   action,
   below,
@@ -163,6 +170,7 @@ export function ListRow({
 }: {
   title: ReactNode
   description?: ReactNode
+  help?: ReactNode
   hint?: ReactNode
   action?: ReactNode
   below?: ReactNode
@@ -180,7 +188,10 @@ export function ListRow({
       <div className={cn('grid gap-3 py-3', !wide && [LIST_ROW_COLUMNS, '@2xl:items-center'])}>
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-3 text-[length:var(--conversation-text-font-size)] font-medium text-foreground">
-            <span className="min-w-0">{title}</span>
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              {title}
+              {help ? <HelpTip text={help} title={typeof title === 'string' ? title : undefined} /> : null}
+            </span>
             {wide && action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
           </div>
           {description && (
@@ -209,6 +220,7 @@ export function ToggleRow({
   'data-tour': dataTour,
   description,
   disabled,
+  help,
   hint,
   id,
   label,
@@ -220,6 +232,7 @@ export function ToggleRow({
   'data-tour'?: string
   description?: ReactNode
   disabled?: boolean
+  help?: ReactNode
   hint?: ReactNode
   id?: string
   label: string
@@ -242,6 +255,7 @@ export function ToggleRow({
       below={below}
       data-tour={dataTour}
       description={description}
+      help={help}
       hint={hint}
       id={id}
       title={label}

@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
+import { HelpTip } from '@/components/ui/help-tip'
 import { deleteEnvVar, getEnvVars, revealEnvVar, setEnvVar } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { type IconComponent } from '@/lib/icons'
@@ -30,11 +32,17 @@ export function filterEnv(info: EnvVarInfo, key: string, q: string, cat: string,
   )
 }
 
-export function SettingsCategoryHeading({ count, icon: Icon, title }: CategoryHeadingProps) {
+export function SettingsCategoryHeading({
+  count,
+  help,
+  icon: Icon,
+  title
+}: CategoryHeadingProps & { help?: ReactNode }) {
   return (
     <div className="mb-3 flex items-center gap-2 text-[length:var(--conversation-text-font-size)] font-medium">
       <Icon className="size-4 text-muted-foreground" />
       <span>{title}</span>
+      {help ? <HelpTip text={help} title={title} /> : null}
       {count && <Pill>{count}</Pill>}
     </div>
   )
