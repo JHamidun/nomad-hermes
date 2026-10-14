@@ -95,16 +95,45 @@ def _is_full_sha(value: Optional[str]) -> bool:
     return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdefABCDEF" for c in value)
 
 
-def _github_compare(current_rev: str, target_rev: str, repository: str = OFFICIAL_REPOSITORY) -> Optional[dict]:
+# owner/repo for the compare API. A fork's two tip SHAs don't exist in the official repo, so a
+# hardcoded default answers 404 when callers omit ``repository`` (shallow update checks).
+_compare_repo_slug_cache: Optional[str] = None
+
+
+def _resolve_repo_dir() -> Optional[Path]:
+    """The active Hermes git checkout, or None if this isn't a git install."""
+    repo_dir = Path(__file__).parent.parent.resolve()
+    if not (repo_dir / ".git").exists():
+        repo_dir = get_hermes_home() / "hermes-agent"
+    return repo_dir if (repo_dir / ".git").exists() else None
+
+
+def _compare_repo_slug() -> str:
+    """``owner/repo`` of this checkout's GitHub origin; the official repo when there is none."""
+    global _compare_repo_slug_cache
+    if _compare_repo_slug_cache is None:
+        slug = OFFICIAL_REPOSITORY.lower()
+        repo_dir = _resolve_repo_dir()
+        if repo_dir is not None:
+            origin = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir) or ""
+            match = _GITHUB_ORIGIN.fullmatch(origin)
+            if match:
+                slug = match[1].lower()
+        _compare_repo_slug_cache = slug
+    return _compare_repo_slug_cache
+
+
+def _github_compare(current_rev: str, target_rev: str, repository: Optional[str] = None) -> Optional[dict]:
     # Do not memoize this separately: force must bypass failed AND successful network results.
     if not (_is_full_sha(current_rev) and _is_full_sha(target_rev)):
         return None
+    repository = repository or _compare_repo_slug()
     payload = _quiet(lambda: json.loads(_request(
         f"https://api.github.com/repos/{repository}/compare/{current_rev}...{target_rev}")))
     return payload if isinstance(payload, dict) else None
 
 
-def _github_compare_behind(current_rev: str, target_rev: str, repository: str = OFFICIAL_REPOSITORY) -> Optional[int]:
+def _github_compare_behind(current_rev: str, target_rev: str, repository: Optional[str] = None) -> Optional[int]:
     payload = _github_compare(current_rev, target_rev, repository)
     ahead = payload.get("ahead_by") if payload else None
     return ahead if isinstance(ahead, int) and not isinstance(ahead, bool) and ahead >= 0 else None
