@@ -236,6 +236,24 @@ def nous_rate_limit_guard(
             compression_attempts=compression_attempts, result=result,
         )
 
+    try:
+        from agent.usage_budget import budget_turn_failure_result, check_usd_budget
+
+        _budget_err = check_usd_budget(agent)
+        if _budget_err is not None:
+            return _verdict(
+                "return",
+                budget_turn_failure_result(
+                    agent,
+                    _budget_err,
+                    messages=messages,
+                    conversation_history=conversation_history,
+                    api_call_count=api_call_count,
+                ),
+            )
+    except Exception:
+        pass
+
     if agent.provider == "nous":
         # A gateway ``x-nous-model-switch`` recorded on the previous response moves this session
         # (and the config default, when it still names the free tier's model) before the next call.

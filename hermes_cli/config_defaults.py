@@ -72,10 +72,18 @@ DEFAULT_CONFIG = {
     "attachments": {
         "storage": "hermes-home",
     },
+    # Session/run USD spend ceiling. null = unlimited (default). When set to a positive number,
+    # agent/usage_budget.py refuses the next model call with a non-retryable classified billing
+    # error once session_estimated_cost_usd reaches or exceeds max_usd.
+    "budget": {
+        "max_usd": None,
+    },
     "agent": {
         # Turn cap. null = unlimited (default; caps caused silent mid-task truncation). Positive int
         # caps; "none"/"unlimited"/"inf"/0/-1 also mean unlimited (resolve_turn_limit).
         "max_turns": None,
+        # Optional per-session USD spend ceiling (alias for budget.max_usd). null = off.
+        "max_usd": None,
         # Optional one-time model-visible checkpoint warning before a finite turn cap is exhausted.
         # null = off; set a ratio strictly between 0 and 1 (for example, 0.75).
         "budget_warning_ratio": None,
