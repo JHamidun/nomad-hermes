@@ -708,6 +708,20 @@ def read_file_tool(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT, 
             result.content = redact_sensitive_text(
                 unredacted, file_read=True, secret_file=_is_secret_file_arg(resolved_str))
             redacted = result.content != unredacted
+            norm_parts = {p.lower() for p in Path(resolved_str).parts}
+            if "hermes-results" in norm_parts or "tool-results" in norm_parts:
+                sanitized = re.sub(
+                    r"</?\s*untrusted_saved_tool_result\s*>",
+                    "[stripped_untrusted_tag]",
+                    result.content,
+                    flags=re.IGNORECASE,
+                )
+                result.content = (
+                    "<untrusted_saved_tool_result>\n"
+                    f"{sanitized}\n"
+                    "</untrusted_saved_tool_result>"
+                )
+                result_dict["untrusted_spill"] = True
             result_dict["content"] = result.content
 
         if result.content:
