@@ -1031,6 +1031,11 @@ def _host_prefix() -> str:
     return f"{_claimer_id().split(':', 1)[0]}:"
 
 
+def host_prefix() -> str:
+    """Public helper returning the ``"<host>:"`` prefix used for host-local claim locks."""
+    return _host_prefix()
+
+
 # --- Task creation / mutation ---
 
 def _validate_model_override(model: Optional[str], provider: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -2315,27 +2320,59 @@ def goal_run_status(
 
 def heartbeat_claim(
     conn: sqlite3.Connection, task_id: str, *, ttl_seconds: Optional[int] = None,
-    claimer: Optional[str] = None,
+    claimer: Optional[str] = None, note: Optional[str] = None,
 ) -> bool:
-    """Extend a running claim; True if we still own it."""
-    expires = int(time.time()) + _resolve_claim_ttl_seconds(ttl_seconds)
-    lock = claimer or _claimer_id()
+    """Extend a running claim and refresh ``last_heartbeat_at``; True if owned.
+
+    When ``claimer`` is omitted and the running task has ``worker_pid IS NULL``
+    (an external lane claim issued on this host), any host-local process may
+    renew the claim so CLI ``hermes kanban heartbeat`` calls across separate
+    processes keep the external claim alive past ``DEFAULT_CLAIM_TTL_SECONDS``.
+    """
+    now = int(time.time())
+    expires = now + _resolve_claim_ttl_seconds(ttl_seconds)
     with write_txn(conn):
+        lock = claimer
+        if lock is None:
+            row = conn.execute(
+                "SELECT claim_lock, worker_pid FROM tasks WHERE id = ? AND status = 'running'",
+                (task_id,),
+            ).fetchone()
+            if not row or not row["claim_lock"]:
+                return False
+            default_lock = _claimer_id()
+            if row["claim_lock"] == default_lock:
+                lock = default_lock
+            elif row["worker_pid"] is None and str(row["claim_lock"]).startswith(_host_prefix()):
+                lock = str(row["claim_lock"])
+            else:
+                lock = default_lock
         cur = conn.execute(
-            "UPDATE tasks SET claim_expires = ? "
-            "WHERE id = ? AND status = 'running' AND claim_lock = ?", (expires, task_id, lock),
+            "UPDATE tasks SET claim_expires = ?, last_heartbeat_at = ? "
+            "WHERE id = ? AND status = 'running' AND claim_lock = ?",
+            (expires, now, task_id, lock),
         )
         if cur.rowcount != 1:
             return False
-        _extend_run_claim(conn, task_id, expires)
+        run_id = _extend_run_claim(conn, task_id, expires, now=now)
+        if note:
+            _append_event(conn, task_id, "heartbeat", {"note": note}, run_id=run_id)
         return True
 
 
-def _extend_run_claim(conn: sqlite3.Connection, task_id: str, expires: int) -> Optional[int]:
+def _extend_run_claim(
+    conn: sqlite3.Connection, task_id: str, expires: int, *, now: Optional[int] = None,
+) -> Optional[int]:
     """Mirror a task claim extension onto its active run row; returns that run id."""
     run_id = _current_run_id(conn, task_id)
     if run_id is not None:
-        conn.execute("UPDATE task_runs SET claim_expires = ? WHERE id = ?", (expires, run_id))
+        if now is not None:
+            conn.execute(
+                "UPDATE task_runs SET claim_expires = ?, last_heartbeat_at = ? WHERE id = ?",
+                (expires, int(now), run_id),
+            )
+        else:
+            conn.execute("UPDATE task_runs SET claim_expires = ? WHERE id = ?", (expires, run_id))
     return run_id
 
 

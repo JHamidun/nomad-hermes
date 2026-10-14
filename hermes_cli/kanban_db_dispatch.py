@@ -613,17 +613,46 @@ def heartbeat_worker(
     *,
     note: Optional[str] = None,
     expected_run_id: Optional[int] = None,
+    ttl_seconds: Optional[int] = None,
+    claimer: Optional[str] = None,
 ) -> bool:
-    """Record a ``heartbeat`` event + touch ``last_heartbeat_at``.
+    """Record a ``heartbeat`` event + touch ``last_heartbeat_at`` (and renew
+    ``claim_expires`` for external claims without ``worker_pid`` or when
+    ``ttl_seconds`` / ``claimer`` is provided).
 
     Liveness signal orthogonal to the PID check: a worker whose forked child
-    (train loop, crawl) is stuck can still have a live Python process.
-    Returns False if the task is not running or its claim expired.
+    (train loop, crawl) is stuck can still have a live Python process, while an
+    external lane without ``worker_pid`` renews its claim lease via heartbeats.
+    Returns False if the task is not running.
     """
     now = int(time.time())
     with _kb.write_txn(conn):
-        sql = "UPDATE tasks SET last_heartbeat_at = ? WHERE id = ? AND status = 'running'"
-        params: tuple = (now, task_id)
+        row = conn.execute(
+            "SELECT claim_lock, worker_pid, current_run_id FROM tasks WHERE id = ? AND status = 'running'",
+            (task_id,),
+        ).fetchone()
+        if not row:
+            return False
+        if expected_run_id is not None and row["current_run_id"] != int(expected_run_id):
+            return False
+        if claimer is not None and row["claim_lock"] != claimer:
+            return False
+        renew_claim = (
+            ttl_seconds is not None
+            or claimer is not None
+            or (row["claim_lock"] is not None and row["worker_pid"] is None)
+        )
+        new_expires = (
+            now + _kb._resolve_claim_ttl_seconds(ttl_seconds)
+            if renew_claim and row["claim_lock"] is not None
+            else None
+        )
+        if new_expires is not None:
+            sql = "UPDATE tasks SET last_heartbeat_at = ?, claim_expires = ? WHERE id = ? AND status = 'running'"
+            params: tuple = (now, new_expires, task_id)
+        else:
+            sql = "UPDATE tasks SET last_heartbeat_at = ? WHERE id = ? AND status = 'running'"
+            params = (now, task_id)
         if expected_run_id is not None:
             sql += " AND current_run_id = ?"
             params += (int(expected_run_id),)
@@ -636,7 +665,13 @@ def heartbeat_worker(
             else _kb._current_run_id(conn, task_id)
         )
         if run_id is not None:
-            conn.execute("UPDATE task_runs SET last_heartbeat_at = ? WHERE id = ?", (now, run_id))
+            if new_expires is not None:
+                conn.execute(
+                    "UPDATE task_runs SET last_heartbeat_at = ?, claim_expires = ? WHERE id = ?",
+                    (now, new_expires, run_id),
+                )
+            else:
+                conn.execute("UPDATE task_runs SET last_heartbeat_at = ? WHERE id = ?", (now, run_id))
         _kb._append_event(
             conn, task_id, "heartbeat",
             {"note": note} if note else None,
