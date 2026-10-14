@@ -24,8 +24,16 @@ import {
   type UpdateTarget
 } from '@/store/updates'
 
-const RELEASE_NOTES_URL = 'https://github.com/NousResearch/hermes-agent/releases'
+export const RELEASE_NOTES_URL = 'https://github.com/NousResearch/hermes-agent/releases'
 const INSTALLER_URL = 'https://hermes-agent.nousresearch.com/'
+
+export function resolveReleaseNotesUrl(config?: Record<string, any> | null): string {
+  const candidate = config?.branding?.release_notes_url
+  if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate.trim())) {
+    return candidate.trim()
+  }
+  return RELEASE_NOTES_URL
+}
 
 export type UpdateStatusTone = 'idle' | 'available' | 'error' | 'unsupported'
 
@@ -286,9 +294,11 @@ function UpdateActions({ target, u, view }: UpdateActionsProps): ReactElement | 
  * "Update now" opens it and starts the install there.
  */
 export function UpdateStatusCard({
+  releaseNotesUrl = RELEASE_NOTES_URL,
   showReleaseNotes = true,
   target
 }: {
+  releaseNotesUrl?: string
   showReleaseNotes?: boolean
   target: UpdateTarget
 }): ReactElement {
@@ -359,10 +369,10 @@ export function UpdateStatusCard({
           {showReleaseNotes && (
             <Button asChild className="ml-auto" size="sm" variant="text">
               <a
-                href={RELEASE_NOTES_URL}
+                href={releaseNotesUrl}
                 onClick={event => {
                   event.preventDefault()
-                  void window.hermesDesktop?.openExternal?.(RELEASE_NOTES_URL)
+                  void window.hermesDesktop?.openExternal?.(releaseNotesUrl)
                 }}
                 rel="noreferrer"
                 target="_blank"

@@ -190,15 +190,36 @@ def _compute_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]
 _RELEASE_URL_BASE = "https://github.com/NousResearch/hermes-agent/releases/tag"
 
 
-def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
-    """Return ``(tag, release_url)`` for the latest local git tag, or None (a miss is cached too).
+def _resolve_release_url_base() -> str:
+    """Resolve release tag URL base from skin/config ``branding.release_notes_url``, else stock."""
+    custom = ""
+    try:
+        from hermes_cli.skin_engine import get_active_skin
+        custom = (get_active_skin().get_branding("release_notes_url") or "").strip()
+    except Exception:
+        pass
+    if not custom:
+        try:
+            from hermes_cli.config import load_config
+            cfg = _quiet(load_config) or {}
+            branding = cfg.get("branding") if isinstance(cfg, dict) else None
+            if isinstance(branding, dict):
+                custom = str(branding.get("release_notes_url") or "").strip()
+        except Exception:
+            pass
+    if custom.startswith(("https://", "http://")):
+        base = custom.rstrip("/")
+        return base if base.endswith("/tag") else f"{base}/tag"
+    return _RELEASE_URL_BASE
 
-    Release URL always points at the canonical NousResearch/hermes-agent repo (forks get no link).
-    """
+
+def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
+    """Return ``(tag, release_url)`` for the latest local git tag, or None (a miss is cached too)."""
     def _compute():
         rd = repo_dir or _resolve_repo_dir()
         tag = source_check._git_stdout(["describe", "--tags", "--abbrev=0"], cwd=rd, timeout=3) if rd else None
-        return (tag, f"{_RELEASE_URL_BASE}/{tag}") if tag else None
+        base = _resolve_release_url_base()
+        return (tag, f"{base}/{tag}") if tag else None
     return _memo("_latest_release_cache", _compute)
 
 
