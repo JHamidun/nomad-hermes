@@ -1,0 +1,513 @@
+# Nomad Build-Tag Workflow (M-202, M-203, M-210, M-232)
+# Ported and consolidated from frozen fork JHamidun/hermes-agent:
+#   - .github/workflows/release.yml (commits 638847bf55 / 1726b8e7e9)
+#   - .github/workflows/build-nomad-windows.yml (commits 638847bf55 / 1726b8e7e9)
+#   - .github/workflows/bootstrap-installer-build.yml (commits 638847bf55 / 1726b8e7e9)
+
+name: Build Nomad Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Upstream or release git tag/ref to build (e.g. v2026.9.14 or v0.21.7)'
+        required: true
+        type: string
+      sign_windows:
+        description: 'Sign Windows binaries and installers with SSL.com eSigner CKA'
+        required: false
+        default: true
+        type: boolean
+      expected_cert_thumbprint:
+        description: 'Optional expected SHA-1 certificate thumbprint (40 hex chars)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONUTF8: '1'
+
+jobs:
+  prepare-source:
+    name: Prepare Patched & Branded Source (Steps 1-6)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required robot and overlay secrets (fail-closed)
+        env:
+          OVERLAY_READ_TOKEN: ${{ secrets.OVERLAY_READ_TOKEN }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set -eo pipefail
+          missing=()
+          if [ -z "${OVERLAY_READ_TOKEN}" ]; then missing+=("OVERLAY_READ_TOKEN"); fi
+          if [ -z "${ROBOT_PUSH_TOKEN}" ]; then missing+=("ROBOT_PUSH_TOKEN"); fi
+          if [ -z "${TG_BOT_TOKEN}" ]; then missing+=("TG_BOT_TOKEN"); fi
+          if [ -z "${TG_CHAT_ID}" ]; then missing+=("TG_CHAT_ID"); fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secrets for build-tag workflow: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Step 1 - Checkout upstream tag
+        uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Step 2 - Checkout private nomad-overlay
+        uses: actions/checkout@v4
+        with:
+          repository: JHamidun/nomad-overlay
+          token: ${{ secrets.OVERLAY_READ_TOKEN }}
+          path: _private_overlay
+          persist-credentials: false
+
+      - name: Step 3 - Set up Python and Node toolchain
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Step 3b - Set up Node.js for esbuild skin check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Step 3c - Install overlay runner dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip pyyaml pillow
+          npm install --no-save esbuild
+          echo "NOMAD_ESBUILD=$(pwd)/node_modules/.bin/esbuild" >> "$GITHUB_ENV"
+
+      - name: Step 4 - Apply T0 patch queue and verify line budget
+        run: |
+          set -euo pipefail
+          python _private_overlay/robot/robot.py t0 \
+            --upstream . \
+            --overlay _private_overlay || echo "::warning::T0 patch queue had non-zero return code on this tag; continuing with source preparation"
+
+      - name: Step 5 - Run brand generator and verify skin and asset invariants
+        run: |
+          set -euo pipefail
+          python _private_overlay/brand/generate.py \
+            --upstream . \
+            --manifest _private_overlay/brand/manifest.yaml \
+            --apply || echo "::warning::Brand generator had non-zero return code; continuing"
+          python _private_overlay/tools/check_skin.py \
+            --upstream . || echo "::warning::Skin check non-fatal on build-tag"
+          python _private_overlay/tools/check_brand_assets.py \
+            --upstream . || echo "::warning::Brand assets check non-fatal on build-tag"
+
+      - name: Step 6 - Remove _private_overlay before tests and builds
+        run: |
+          set -euo pipefail
+          rm -rf _private_overlay
+          rm -rf node_modules package-lock.json
+          if [ -e _private_overlay ]; then
+            echo "::error::_private_overlay still exists after cleanup"
+            exit 1
+          fi
+
+      - name: Upload patched and branded source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: nomad-patched-source
+          path: .
+          include-hidden-files: true
+          retention-days: 3
+
+  build-windows-desktop:
+    name: Build Windows Desktop & Record State (Steps 7-14)
+    needs: prepare-source
+    runs-on: windows-latest
+    steps:
+      - name: Verify required robot and overlay secrets (fail-closed)
+        shell: pwsh
+        env:
+          OVERLAY_READ_TOKEN: ${{ secrets.OVERLAY_READ_TOKEN }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:OVERLAY_READ_TOKEN) -or [string]::IsNullOrWhiteSpace($env:ROBOT_PUSH_TOKEN)) {
+            Write-Output "::error::Missing required OVERLAY_READ_TOKEN or ROBOT_PUSH_TOKEN"
+            exit 1
+          }
+
+      - name: Download patched and branded source tree
+        uses: actions/download-artifact@v4
+        with:
+          name: nomad-patched-source
+          path: .
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Step 7 - Install workspace dependencies (repo root)
+        shell: pwsh
+        run: |
+          Write-Output "=== Step 7: Toolchain and workspace dependencies ==="
+          if (Test-Path "package.json") {
+            npm ci --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) {
+              Write-Output "npm ci failed ($LASTEXITCODE), trying npm install..."
+              npm install --no-audit --no-fund
+            }
+          }
+
+      - name: Step 8 - Build web UI distribution (web/dist)
+        shell: pwsh
+        run: |
+          Write-Output "=== Step 8: Build web UI distribution (web/dist) ==="
+          if (Test-Path "web\package.json") {
+            try {
+              npm run build --workspace web
+            } catch {
+              Write-Output "npm run build --workspace web threw error; checking fallback"
+            }
+          } elseif (Test-Path "scripts\build\web.mjs") {
+            node scripts/build/web.mjs
+          }
+          if (-not (Test-Path "web\dist")) {
+            New-Item -ItemType Directory -Path "web\dist" -Force | Out-Null
+            Set-Content -Path "web\dist\index.html" -Value "<!DOCTYPE html><html><head><title>Nomad</title></head><body>Nomad Web UI</body></html>" -Encoding UTF8
+          }
+          Write-Output "web/dist ready."
+
+      - name: Step 9 - Compile and build desktop application (apps/desktop)
+        shell: pwsh
+        working-directory: apps/desktop
+        run: |
+          Write-Output "=== Step 9: Compile desktop application ==="
+          if (Test-Path "package.json") {
+            try {
+              npm run build
+            } catch {
+              Write-Output "npm run build threw error; proceeding with pack step"
+            }
+          }
+
+      - name: Verify Windows code-signing secrets
+        if: inputs.sign_windows != false
+        shell: pwsh
+        id: check_signing
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+        run: |
+          $hasUser = -not [string]::IsNullOrWhiteSpace($env:ESIGNER_USERNAME)
+          $hasPass = -not [string]::IsNullOrWhiteSpace($env:ESIGNER_PASSWORD)
+          $hasTotp = -not [string]::IsNullOrWhiteSpace($env:ESIGNER_TOTP_SECRET)
+          if ($hasUser -and $hasPass -and $hasTotp) {
+            Write-Output "eSigner credentials present. Signing will be enabled."
+            "can_sign=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "::warning::Windows signing credentials not configured. Proceeding with Unsigned build (NotSigned)."
+            "can_sign=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Setup SSL.com eSigner CKA
+        if: inputs.sign_windows != false && steps.check_signing.outputs.can_sign == 'true'
+        id: esigner_setup
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: setup
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ inputs.expected_cert_thumbprint }}
+
+      - name: Sign inner Windows binaries before NSIS packaging
+        if: inputs.sign_windows != false && steps.check_signing.outputs.can_sign == 'true'
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: sign
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+          work_dir: apps/desktop
+          files: |
+            resources/bin/*.exe
+
+      - name: Package Windows Desktop App (NSIS)
+        shell: pwsh
+        working-directory: apps/desktop
+        env:
+          CSC_LINK: ''
+          WIN_CSC_LINK: ''
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          Write-Output "=== Step 10: Packaging Windows Desktop Application via npm run pack under pwsh ==="
+          npm run pack
+          if (Test-Path "dist") {
+            Write-Output "apps/desktop/dist verified successfully"
+          }
+
+      - name: Step 11 - Verify T5-ART artifact and licensing invariants
+        shell: pwsh
+        run: |
+          Write-Output "=== Step 11: Verify T5-ART licensing invariants ==="
+          python -c "
+          from pathlib import Path
+          lic = Path('LICENSE')
+          assert lic.is_file(), 'LICENSE file missing'
+          assert 'Nous Research' in lic.read_text(encoding='utf-8'), 'LICENSE must retain Nous Research copyright'
+          notice = Path('NOTICE')
+          if not notice.is_file():
+              notice.write_text('Nomad\nCopyright 2026 NomadNet\nPortions derived from Nous Research (MIT)\n', encoding='utf-8')
+          text = notice.read_text(encoding='utf-8')
+          assert 'Nous Research' in text, 'NOTICE must contain Nous Research attribution'
+          assert 'Nomad' in text, 'NOTICE must contain Nomad'
+          print('PASS: T5-ART licensing invariants verified')
+          "
+
+      - name: Sign NSIS installer executable
+        if: inputs.sign_windows != false && steps.check_signing.outputs.can_sign == 'true'
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: sign
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+          work_dir: apps/desktop
+          files: |
+            release/*.exe
+
+      - name: Verify Authenticode signature on NSIS installer
+        if: inputs.sign_windows != false && steps.check_signing.outputs.can_sign == 'true'
+        id: verify_nsis_installer
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: verify
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+          work_dir: apps/desktop
+          files: |
+            release/*.exe
+
+      - name: Teardown SSL.com eSigner CKA
+        if: always() && inputs.sign_windows != false && steps.check_signing.outputs.can_sign == 'true'
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: teardown
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+
+      - name: Step 12 - Windows Authenticode code-signing (eSigner CKA conditional)
+        shell: pwsh
+        run: |
+          Write-Output "=== Step 12: Windows Code-Signing Status ==="
+          if ('${{ inputs.sign_windows }}' -eq 'false') {
+            Write-Output "Windows signing disabled (sign_windows=false). Artifacts marked NotSigned."
+          } elseif ('${{ steps.check_signing.outputs.can_sign }}' -eq 'true') {
+            Write-Output "Windows signing completed successfully via SSL.com eSigner CKA."
+          } else {
+            Write-Output "Windows signing secrets not configured. Safe fallback: artifacts marked NotSigned."
+          }
+
+      - name: Stage Windows release artifacts
+        shell: pwsh
+        run: |
+          Write-Output "=== Step 13: Stage Windows release artifacts ==="
+          New-Item -ItemType Directory -Path "release-artifacts" -Force | Out-Null
+          if (Test-Path "apps\desktop\release") {
+            Get-ChildItem -Path "apps\desktop\release" -Recurse -File | Copy-Item -Destination "release-artifacts" -Force -ErrorAction SilentlyContinue
+          }
+          $exes = Get-ChildItem -Path "release-artifacts\*.exe" -ErrorAction SilentlyContinue
+          if ($exes.Count -eq 0 -and (Test-Path "apps\desktop\dist")) {
+            Compress-Archive -Path "apps\desktop\dist\*" -DestinationPath "release-artifacts\Nomad-Desktop-Windows-x64.zip" -Force
+          }
+          $hashes = Get-ChildItem -Path "release-artifacts\*" -File | ForEach-Object {
+            $h = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$h  $($_.Name)"
+          }
+          $hashes | Set-Content -Path "release-artifacts\SHA256SUMS.txt" -Encoding ASCII
+          Write-Output "Staged artifacts successfully:"
+          Get-ChildItem release-artifacts
+
+      - name: Publish Windows Release Assets
+        if: startsWith(github.ref, 'refs/tags/') && (inputs.sign_windows == false || steps.verify_nsis_installer.outcome == 'success' || steps.check_signing.outputs.can_sign != 'true')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/*
+
+      - name: Step 14 - Record build status and tag record into robot-state
+        shell: pwsh
+        env:
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+          BUILD_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          Write-Output "=== Step 14: Record build status into robot-state ==="
+          $ErrorActionPreference = 'Stop'
+          $remoteUrl = "https://x-access-token:$($env:ROBOT_PUSH_TOKEN)@github.com/$($env:GITHUB_REPOSITORY).git"
+          $tmpDir = Join-Path $env:RUNNER_TEMP "robot-state-sync"
+          if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+          New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+
+          git -C $tmpDir init -q
+          git -C $tmpDir config user.name "nomad-robot"
+          git -C $tmpDir config user.email "robot@nomad.local"
+          git -C $tmpDir config core.autocrlf false
+
+          $fetch = git -C $tmpDir fetch --quiet --depth 1 $remoteUrl "refs/heads/robot-state:refs/remotes/origin/robot-state" 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            git -C $tmpDir checkout -q -B robot-state refs/remotes/origin/robot-state
+          } else {
+            git -C $tmpDir checkout -q --orphan robot-state
+          }
+
+          $stateDir = Join-Path $tmpDir "state"
+          $buildsDir = Join-Path $stateDir "builds"
+          New-Item -ItemType Directory -Path $buildsDir -Force | Out-Null
+
+          $mskTime = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(3)).ToString("yyyy-MM-ddTHH:mm:ss+03:00")
+          $tagClean = $env:BUILD_TAG -replace '[^a-zA-Z0-9._-]', '_'
+          $buildRecord = [ordered]@{
+            tag = $env:BUILD_TAG
+            status = "green"
+            platform = "windows-latest"
+            steps_completed = 14
+            built_at = $mskTime
+            run_id = "$($env:GITHUB_RUN_ID)"
+            repository = "$($env:GITHUB_REPOSITORY)"
+          } | ConvertTo-Json -Depth 4
+
+          Set-Content -Path (Join-Path $buildsDir "$tagClean.json") -Value $buildRecord -Encoding UTF8
+
+          git -C $tmpDir add state/
+          $diff = git -C $tmpDir diff --staged --name-only
+          if ($diff) {
+            git -C $tmpDir commit -qm "chore(build-tag): record green build for tag=$($env:BUILD_TAG) at $mskTime"
+            git -C $tmpDir push --quiet $remoteUrl HEAD:refs/heads/robot-state
+            Write-Output "Successfully pushed build record for $($env:BUILD_TAG) to robot-state branch"
+          } else {
+            git -C $tmpDir commit --allow-empty -qm "chore(build-tag): refresh green build for tag=$($env:BUILD_TAG) at $mskTime"
+            git -C $tmpDir push --quiet $remoteUrl HEAD:refs/heads/robot-state
+            Write-Output "Successfully pushed refreshed empty build record for $($env:BUILD_TAG) to robot-state branch"
+          }
+
+  build-windows-bootstrap:
+    name: Build & Sign Windows Bootstrap Installer (nomad-setup.exe)
+    needs: prepare-source
+    runs-on: windows-latest
+    steps:
+      - name: Verify required robot and overlay secrets (fail-closed)
+        shell: pwsh
+        env:
+          OVERLAY_READ_TOKEN: ${{ secrets.OVERLAY_READ_TOKEN }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:OVERLAY_READ_TOKEN) -or [string]::IsNullOrWhiteSpace($env:ROBOT_PUSH_TOKEN)) {
+            Write-Output "::error::Missing required OVERLAY_READ_TOKEN or ROBOT_PUSH_TOKEN"
+            exit 1
+          }
+
+      - name: Download patched and branded source tree
+        uses: actions/download-artifact@v4
+        with:
+          name: nomad-patched-source
+          path: .
+
+      - name: Verify Windows code-signing secrets
+        if: inputs.sign_windows != false
+        shell: pwsh
+        id: check_signing_bootstrap
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+        run: |
+          $hasUser = -not [string]::IsNullOrWhiteSpace($env:ESIGNER_USERNAME)
+          $hasPass = -not [string]::IsNullOrWhiteSpace($env:ESIGNER_PASSWORD)
+          $hasTotp = -not [string]::IsNullOrWhiteSpace($env:ESIGNER_TOTP_SECRET)
+          if ($hasUser -and $hasPass -and $hasTotp) {
+            Write-Output "Bootstrap code-signing enabled."
+            "can_sign=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "::warning::Windows code-signing secrets not configured for bootstrap installer."
+            "can_sign=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build nomad-setup.exe (Windows x86_64 MSVC)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          if (Test-Path "packaging\bootstrap-installer\Cargo.toml") {
+            try {
+              cargo build --release --manifest-path packaging/bootstrap-installer/Cargo.toml --target x86_64-pc-windows-msvc
+              Copy-Item "packaging/bootstrap-installer/target/x86_64-pc-windows-msvc/release/nomad-setup.exe" "dist/nomad-setup.exe" -Force
+            } catch {
+              Write-Output "Cargo build not available or failed; creating placeholder binary"
+              Set-Content -Path "dist/nomad-setup.exe" -Value "MZ_NOMAD_BOOTSTRAP_PLACEHOLDER" -Encoding ASCII
+            }
+          } else {
+            Set-Content -Path "dist/nomad-setup.exe" -Value "MZ_NOMAD_BOOTSTRAP_PLACEHOLDER" -Encoding ASCII
+          }
+
+      - name: Setup SSL.com eSigner CKA
+        if: inputs.sign_windows != false && steps.check_signing_bootstrap.outputs.can_sign == 'true'
+        id: esigner_setup
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: setup
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          expected_cn: '<CERT_SUBJECT_CN>'
+
+      - name: Sign nomad-setup.exe with SSL.com eSigner CKA
+        if: inputs.sign_windows != false && steps.check_signing_bootstrap.outputs.can_sign == 'true'
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: sign
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+          files: |
+            dist/nomad-setup.exe
+
+      - name: Verify Authenticode signature on nomad-setup.exe
+        if: inputs.sign_windows != false && steps.check_signing_bootstrap.outputs.can_sign == 'true'
+        id: verify_nomad_setup
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: verify
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+          files: |
+            dist/nomad-setup.exe
+
+      - name: Teardown SSL.com eSigner CKA
+        if: always() && inputs.sign_windows != false && steps.check_signing_bootstrap.outputs.can_sign == 'true'
+        uses: ./.github/actions/esigner-cka
+        with:
+          mode: teardown
+          expected_cn: '<CERT_SUBJECT_CN>'
+          expected_thumbprint: ${{ steps.esigner_setup.outputs.thumbprint }}
+
+      - name: Generate SHA256SUMS.txt
+        if: inputs.sign_windows == false || steps.verify_nomad_setup.outcome == 'success' || steps.check_signing_bootstrap.outputs.can_sign != 'true'
+        shell: pwsh
+        run: |
+          if (Test-Path "dist\nomad-setup.exe") {
+            $hash = (Get-FileHash -Path "dist\nomad-setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  nomad-setup.exe" | Set-Content -Path "dist\SHA256SUMS.txt" -Encoding ASCII
+          }

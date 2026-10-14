@@ -1,0 +1,115 @@
+name: 'SSL.com eSigner CKA'
+description: 'Reusable composite action for SSL.com eSigner CKA setup, Windows Authenticode signing, verification, and teardown'
+
+inputs:
+  mode:
+    description: 'Execution mode: setup, sign, verify, or teardown'
+    required: true
+  username:
+    description: 'SSL.com account username'
+    required: false
+    default: ''
+  password:
+    description: 'SSL.com account password'
+    required: false
+    default: ''
+  totp_secret:
+    description: 'SSL.com TOTP secret (Base32)'
+    required: false
+    default: ''
+  credential_id:
+    description: 'Optional SSL.com credential ID for masterconfig'
+    required: false
+    default: ''
+  expected_cn:
+    description: 'Expected certificate Subject CN substring'
+    required: false
+    default: '<CERT_SUBJECT_CN>'
+  expected_thumbprint:
+    description: 'Expected certificate SHA-1 thumbprint (40 hex chars)'
+    required: false
+    default: ''
+  timestamp_url:
+    description: 'Primary RFC3161 timestamp server URL'
+    required: false
+    default: 'http://ts.ssl.com'
+  fallback_timestamp_url:
+    description: 'Fallback RFC3161 timestamp server URL'
+    required: false
+    default: 'http://timestamp.digicert.com'
+  files:
+    description: 'Newline-delimited list of file paths or globs to sign or verify'
+    required: false
+    default: ''
+  work_dir:
+    description: 'Working directory for resolving relative file paths'
+    required: false
+    default: '.'
+  cka_zip_url:
+    description: 'Pinned eSigner CKA release archive URL'
+    required: false
+    default: 'https://github.com/SSLcom/eSignerCKA/releases/download/v1.1.2/SSL.COM-eSigner-CKA_1.1.2.zip'
+  cka_zip_sha256:
+    description: 'Expected SHA-256 hash of the eSigner CKA release archive'
+    required: false
+    default: '071ca52986795e7a00dfbd87cc5818d03af74daac32dfe32afd4171b676c4d13'
+  cka_install_dir:
+    description: 'Override eSigner CKA installation directory (for testing)'
+    required: false
+    default: ''
+  cka_log_dir:
+    description: 'Directory where CKA error logs are written'
+    required: false
+    default: ''
+
+outputs:
+  thumbprint:
+    description: 'Selected code-signing certificate thumbprint'
+    value: ${{ steps.run_cka.outputs.thumbprint }}
+  subject:
+    description: 'Selected code-signing certificate Subject'
+    value: ${{ steps.run_cka.outputs.subject }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Execute eSigner CKA mode
+      id: run_cka
+      shell: pwsh
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_USERNAME: ${{ inputs.username }}
+        INPUT_PASSWORD: ${{ inputs.password }}
+        INPUT_TOTP_SECRET: ${{ inputs.totp_secret }}
+        INPUT_CREDENTIAL_ID: ${{ inputs.credential_id }}
+        INPUT_EXPECTED_CN: ${{ inputs.expected_cn }}
+        INPUT_EXPECTED_THUMBPRINT: ${{ inputs.expected_thumbprint }}
+        INPUT_TIMESTAMP_URL: ${{ inputs.timestamp_url }}
+        INPUT_FALLBACK_TIMESTAMP_URL: ${{ inputs.fallback_timestamp_url }}
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_WORK_DIR: ${{ inputs.work_dir }}
+        INPUT_CKA_ZIP_URL: ${{ inputs.cka_zip_url }}
+        INPUT_CKA_ZIP_SHA256: ${{ inputs.cka_zip_sha256 }}
+        INPUT_CKA_INSTALL_DIR: ${{ inputs.cka_install_dir }}
+        INPUT_CKA_LOG_DIR: ${{ inputs.cka_log_dir }}
+      run: |
+        & "${{ github.action_path }}/esigner-cka.ps1" -Mode $env:INPUT_MODE
+
+    - name: Dump CKA error logs on failure
+      if: failure() && (inputs.mode == 'setup' || inputs.mode == 'sign')
+      shell: pwsh
+      env:
+        INPUT_CKA_LOG_DIR: ${{ inputs.cka_log_dir }}
+      run: |
+        & "${{ github.action_path }}/esigner-cka.ps1" -Mode dump-logs
+
+    - name: Cleanup secrets and keystore on teardown
+      if: always() && inputs.mode == 'teardown'
+      shell: pwsh
+      env:
+        INPUT_EXPECTED_CN: ${{ inputs.expected_cn }}
+        INPUT_EXPECTED_THUMBPRINT: ${{ inputs.expected_thumbprint }}
+        INPUT_CKA_INSTALL_DIR: ${{ inputs.cka_install_dir }}
+        INPUT_CKA_LOG_DIR: ${{ inputs.cka_log_dir }}
+      run: |
+        & "${{ github.action_path }}/esigner-cka.ps1" -Mode teardown-cleanup
