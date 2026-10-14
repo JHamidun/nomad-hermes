@@ -4,6 +4,7 @@ import { JsonDocumentEditor } from '@/components/chat/json-document-editor'
 import { LogSearchField, useLogSearch } from '@/components/chat/log-search'
 import { LogTail } from '@/components/chat/log-tail'
 import { Button } from '@/components/ui/button'
+import { HelpTip } from '@/components/ui/help-tip'
 import { TextTab } from '@/components/ui/text-tab'
 import { useI18n } from '@/i18n'
 import { notifyError } from '@/store/notifications'
@@ -35,6 +36,7 @@ export function McpJsonEditor({ controller, highlightServer }: McpJsonEditorProp
       header={
         <>
           mcp.json
+          <HelpTip text={m.allServers} title="mcp.json" />
           {controller.dirty && <span aria-hidden className="size-1.5 rounded-full bg-current/60" />}
         </>
       }

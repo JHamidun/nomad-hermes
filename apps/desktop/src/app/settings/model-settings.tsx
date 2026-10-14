@@ -1141,7 +1141,7 @@ export function ModelSettings({ onMainModelChanged, scopeProfile, subpage }: Mod
       {showAuxiliary && (
         <section>
           <div className={cn('mb-2.5 flex items-center', subpage === undefined ? 'justify-between' : 'justify-end')}>
-            {subpage === undefined && <SectionHeading icon={Cpu} title={m.auxiliaryTitle} />}
+            {subpage === undefined && <SectionHeading help={m.auxiliaryDesc} icon={Cpu} title={m.auxiliaryTitle} />}
             <Button
               disabled={!mainModel || applying}
               onClick={() => void resetAuxiliaryModels()}

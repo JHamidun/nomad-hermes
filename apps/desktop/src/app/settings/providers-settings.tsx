@@ -14,6 +14,7 @@ import {
   sortProviders
 } from '@/components/onboarding'
 import { Button } from '@/components/ui/button'
+import { HelpTip } from '@/components/ui/help-tip'
 import { RowButton } from '@/components/ui/row-button'
 import { SearchField } from '@/components/ui/search-field'
 import { Tip } from '@/components/ui/tooltip'
@@ -44,10 +45,11 @@ const canRunInTerminal = () => typeof window !== 'undefined' && Boolean(window.h
 
 // Parallel group headers ("Connected", "Other providers") so the expanded list
 // reads as its own section instead of bleeding into the connected group.
-function GroupLabel({ children }: { children: ReactNode }) {
+function GroupLabel({ children, help }: { children: ReactNode; help?: ReactNode }) {
   return (
-    <p className="mt-3 px-0.5 text-[length:var(--conversation-caption-font-size)] font-medium text-(--ui-text-tertiary)">
+    <p className="mt-3 inline-flex items-center gap-1.5 px-0.5 text-[length:var(--conversation-caption-font-size)] font-medium text-(--ui-text-tertiary)">
       {children}
+      {help ? <HelpTip text={help} /> : null}
     </p>
   )
 }

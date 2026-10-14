@@ -30,6 +30,7 @@ import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from './ui/command'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
+import { HelpTip } from './ui/help-tip'
 import { HighlightMatches } from './ui/highlight-matches'
 import { Skeleton } from './ui/skeleton'
 
@@ -398,7 +399,10 @@ function ModelResults({
                     </span>
                   )}
                   {locked && (
-                    <span className="shrink-0 text-[0.62rem] uppercase tracking-wide opacity-80">{copy.pro}</span>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[0.62rem] uppercase tracking-wide opacity-80">
+                      {copy.pro}
+                      <HelpTip side="right" text={copy.pro} title={copy.pro} />
+                    </span>
                   )}
                   {resetLabel && (
                     <Badge
