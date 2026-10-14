@@ -137,6 +137,10 @@ VALID_HOOKS: set[str] = {
     # auth/pairing and dispatch. Kwargs: event, gateway, session_store. Return {"action": "skip",
     # "reason"} -> drop; {"action": "rewrite", "text"} -> replace event.text; "allow"/None -> normal.
     "pre_gateway_dispatch", "post_gateway_admission",  # post_*: fail-open consume, gateway/run_inbound_consumer.py
+    # gateway_started: fired once in GatewayStartupMixin._start_post_connect_services after platform
+    # adapters connect and gateway:startup is emitted. Kwargs: platforms (list[str]), connected_count (int),
+    # gateway (GatewayRunner). Observer-only; return values are ignored.
+    "gateway_started",
     # agent_loop_stopped: an agent turn was interrupted mid-run (/stop, or the running-agent
     # fast-path of /new; see gateway/run.py::_interrupt_and_clear_session). Kwargs: session_key,
     # platform, reason, invalidation_reason. Return values are ignored.

@@ -1491,6 +1491,15 @@ class GatewayStartupMixin:
         if hook_count:
             logger.info("%s hook(s) loaded", hook_count)
         await self.hooks.emit("gateway:startup", {"platforms": [p.value for p in self.adapters]})
+        with _log_suppressed(logging.WARNING, "Plugin gateway_started hook failed: %s"):
+            from hermes_cli.lifecycle import invoke_hook
+
+            invoke_hook(
+                "gateway_started",
+                platforms=[p.value for p in self.adapters],
+                connected_count=connected_count,
+                gateway=self,
+            )
         if connected_count > 0:
             logger.info("Gateway running with %s platform(s)", connected_count)
         # Initial channel directory for send_message name resolution
