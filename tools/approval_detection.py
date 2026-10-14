@@ -254,7 +254,7 @@ DANGEROUS_PATTERNS = [
     # See #69472.
     (r'\bremove-item\b[^\n;|&]*\s-(?:recurse|force)\b', "PowerShell destructive delete (Remove-Item)"),
     # Bare cmd builtins with /s (recurse) or /q (quiet); plain `del file.txt` is covered only by the prefixed rule.
-    (r'\b(?:del|erase|rd|rmdir)\s+(?:/[a-z]\s+)*/[sq]\b', "Windows destructive delete (recursive/quiet switch)"),
+    (r'\b(?:del|erase|rd|rmdir)\s+(?:(?:/[a-z]|[^\s;|&"\'/][^\s;|&"\']*)\s+)*/[sq]\b', "Windows destructive delete (recursive/quiet switch)"),
     # Remote content piped to Invoke-Expression — PowerShell's `curl | sh`.
     (r'\b(?:iwr|invoke-webrequest|invoke-restmethod|irm|curl|wget)\b[^\n]*\|\s*(?:iex|invoke-expression)\b', "pipe remote content to PowerShell (iwr | iex)"),
     (r'\b(?:iex|invoke-expression)\s*\(\s*(?:iwr|invoke-webrequest|invoke-restmethod|irm)\b', "execute remote content via Invoke-Expression"),
@@ -378,7 +378,7 @@ DANGEROUS_PATTERNS = [
     # regardless of subcommand. The flag must be in global position (before the subcommand) and -H/--host/--context
     # must carry a value, keeping `docker -h` and `docker run -h <hostname>` out. Listed BEFORE the lifecycle rules so
     # a redirected lifecycle command surfaces the more specific reason.
-    (r'\bdocker\s+' + _CONTAINER_GLOBAL_FLAGS + r'(?:-h|--host)[=\s]+\S+', "docker with remote daemon redirect (-H/--host)"),
+    (r'\bdocker\s+' + _CONTAINER_GLOBAL_FLAGS + r'(?:(?-i:-H)|--host)[=\s]+\S+', "docker with remote daemon redirect (-H/--host)"),
     (r'\bdocker\s+' + _CONTAINER_GLOBAL_FLAGS + r'(?:-c|--context)[=\s]+\S+', "docker with daemon redirect (--context: alternate daemon)"),
     (r'\bdocker\s+context\s+use\b', "docker context use (switches default daemon for future commands)"),
     (r'\bpodman\s+' + _CONTAINER_GLOBAL_FLAGS + r'(?:--url|--connection|--identity)[=\s]+\S+', "podman with remote daemon redirect (--url/--connection/--identity)"),
@@ -488,6 +488,9 @@ DANGEROUS_PATTERNS_COMPILED = [(re.compile(p, _RE_FLAGS), d) for p, d in DANGERO
 _QUOTE_MASKED_DANGEROUS_DESCRIPTIONS = frozenset({
     "find dynamic shell word may expand to destructive flag",
     "dynamic shell word may expand to arbitrary program execution flag",
+    "docker with remote daemon redirect (-H/--host)",
+    "docker with daemon redirect (--context: alternate daemon)",
+    "Windows destructive delete (recursive/quiet switch)",
 })
 
 # Preserve approvals stored under the removed interpreter regex rules.
