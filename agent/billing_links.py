@@ -59,6 +59,37 @@ _PROVIDERS: tuple[_Provider, ...] = (
 )
 
 _BY_SLUG: dict[str, _Provider] = {slug: p for p in _PROVIDERS for slug in p.slugs}
+_CUSTOM_PROVIDERS: dict[str, _Provider] = {}
+
+
+def register_billing_provider(
+    slug: str,
+    label: str,
+    url: str,
+    *,
+    slugs: tuple[str, ...] = (),
+    hosts: tuple[str, ...] = (),
+) -> None:
+    """Register or override a billing-recovery provider link at runtime."""
+    primary = (slug or "").strip().lower()
+    if not primary:
+        raise ValueError("slug must be non-empty")
+    all_slugs = tuple(dict.fromkeys((primary, *(s.strip().lower() for s in slugs if s and s.strip()))))
+    norm_hosts = tuple(h.strip().lower() for h in hosts if h and h.strip())
+    entry = _Provider(label=str(label).strip() or primary.title(), url=str(url).strip(), slugs=all_slugs, hosts=norm_hosts)
+    for s in all_slugs:
+        _CUSTOM_PROVIDERS[s] = entry
+
+
+def unregister_billing_provider(slug: str) -> None:
+    """Remove a previously registered runtime billing provider by slug."""
+    primary = (slug or "").strip().lower()
+    target = _CUSTOM_PROVIDERS.get(primary)
+    if target is None:
+        return
+    for s in list(_CUSTOM_PROVIDERS):
+        if _CUSTOM_PROVIDERS.get(s) == target:
+            _CUSTOM_PROVIDERS.pop(s, None)
 
 
 def is_nous_inference_route(provider: str, base_url: str) -> bool:
@@ -76,10 +107,13 @@ def _nous_billing_url() -> Optional[str]:
 
 
 def _resolve_provider_link(slug: str, base_url: str) -> tuple[str, Optional[str]]:
-    """Resolve ``(label, url)``: exact slug → base_url host → readable-label fallback."""
+    """Resolve ``(label, url)``: custom registry → exact slug → base_url host → readable-label fallback."""
     base = str(base_url or "")
-    hit = _BY_SLUG.get(slug) or next(
-        (p for p in _PROVIDERS if any(base_url_host_matches(base, host) for host in p.hosts)), None
+    hit = (
+        _CUSTOM_PROVIDERS.get(slug)
+        or next((p for p in _CUSTOM_PROVIDERS.values() if any(base_url_host_matches(base, host) for host in p.hosts)), None)
+        or _BY_SLUG.get(slug)
+        or next((p for p in _PROVIDERS if any(base_url_host_matches(base, host) for host in p.hosts)), None)
     )
     if hit:
         return hit.label, hit.url
