@@ -29,6 +29,25 @@ from hermes_state_compression import _CHAIN_CAP
 logger = logging.getLogger("hermes_state")
 
 
+def _fire_session_deleted_hook(session_ids: Sequence[str]) -> None:
+    """Best-effort ``on_session_deleted`` observer, invoked AFTER the write txn commits."""
+    ids = [sid for sid in session_ids if isinstance(sid, str) and sid]
+    if not ids:
+        return
+    try:
+        from hermes_cli.lifecycle import has_hook, invoke_hook
+
+        if not has_hook("on_session_deleted"):
+            return
+        for sid in ids:
+            try:
+                invoke_hook("on_session_deleted", session_id=sid)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("on_session_deleted hook failed for %s: %s", sid, exc)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("on_session_deleted dispatch failed: %s", exc)
+
+
 def workspace_key(row: dict[str, Any]) -> Optional[str]:
     """Workspace grouping key: git repo root, else cwd, else None (branch excluded: a checkout must not
     fragment history)."""
@@ -1747,6 +1766,8 @@ class SessionSessionsMixin:
         deleted = self._execute_write(_do)
         for sid in removed_ids:
             self._remove_session_files(sessions_dir, sid)
+        if deleted:
+            _fire_session_deleted_hook(removed_ids)
         return bool(deleted)
 
     def delete_session_if_empty(self, session_id: str, sessions_dir: Optional[Path] = None) -> bool:
@@ -1779,6 +1800,7 @@ class SessionSessionsMixin:
         deleted = self._execute_write(_do)
         if deleted:
             self._remove_session_files(sessions_dir, session_id)
+            _fire_session_deleted_hook([session_id])
         return deleted
 
     def delete_sessions(
@@ -1860,6 +1882,8 @@ class SessionSessionsMixin:
         count = self._execute_write(_do)
         for sid in removed_ids:
             self._remove_session_files(sessions_dir, sid)
+        if removed_ids:
+            _fire_session_deleted_hook(removed_ids)
         return count
 
     # Shared by count_empty_sessions / delete_empty_sessions so badge and sweep agree. message_count
@@ -1898,6 +1922,8 @@ class SessionSessionsMixin:
         count = self._execute_write(_do)
         for sid in removed_ids:
             self._remove_session_files(sessions_dir, sid)
+        if removed_ids:
+            _fire_session_deleted_hook(removed_ids)
         return count
 
     def archive_sessions(
