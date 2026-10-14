@@ -1,0 +1,96 @@
+# Nomad Robot Smoke Workflow (M-028b, M-232)
+# Runs in public JHamidun/nomad-hermes on ubuntu-latest:
+#   1. Fail-closed checks required secrets (OVERLAY_READ_TOKEN, ROBOT_PUSH_TOKEN, TG_BOT_TOKEN, TG_CHAT_ID)
+#   2. Checks out private JHamidun/nomad-overlay into _private_overlay (persist-credentials: false)
+#   3. Runs python _private_overlay/robot/smoke.py -> pushes empty commit to robot-state branch
+#      in JHamidun/nomad-hermes and sends Telegram message (printing message_id in log)
+#   4. Always removes _private_overlay before finishing
+
+name: Robot Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag label to include in the smoke report'
+        required: false
+        default: 'v0.21.7'
+        type: string
+      simulate_missing_secret:
+        description: 'Optional secret name to blank out for red-path verification (TG_BOT_TOKEN, TG_CHAT_ID, ROBOT_PUSH_TOKEN, OVERLAY_READ_TOKEN)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUTF8: '1'
+
+jobs:
+  robot-smoke:
+    name: Robot Smoke Check (robot-state push + Telegram report)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify required robot and overlay secrets (fail-closed)
+        env:
+          OVERLAY_READ_TOKEN: ${{ secrets.OVERLAY_READ_TOKEN }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          SIMULATE_MISSING_SECRET: ${{ inputs.simulate_missing_secret }}
+        run: |
+          set -eo pipefail
+          missing=()
+          if [ "${SIMULATE_MISSING_SECRET}" = "OVERLAY_READ_TOKEN" ]; then OVERLAY_READ_TOKEN=""; fi
+          if [ "${SIMULATE_MISSING_SECRET}" = "ROBOT_PUSH_TOKEN" ]; then ROBOT_PUSH_TOKEN=""; fi
+          if [ "${SIMULATE_MISSING_SECRET}" = "TG_BOT_TOKEN" ]; then TG_BOT_TOKEN=""; fi
+          if [ "${SIMULATE_MISSING_SECRET}" = "TG_CHAT_ID" ]; then TG_CHAT_ID=""; fi
+          if [ -z "${OVERLAY_READ_TOKEN}" ]; then missing+=("OVERLAY_READ_TOKEN"); fi
+          if [ -z "${ROBOT_PUSH_TOKEN}" ]; then missing+=("ROBOT_PUSH_TOKEN"); fi
+          if [ -z "${TG_BOT_TOKEN}" ]; then missing+=("TG_BOT_TOKEN"); fi
+          if [ -z "${TG_CHAT_ID}" ]; then missing+=("TG_CHAT_ID"); fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secret(s) for robot-smoke workflow: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Checkout private nomad-overlay into temporary directory
+        uses: actions/checkout@v4
+        with:
+          repository: JHamidun/nomad-overlay
+          token: ${{ secrets.OVERLAY_READ_TOKEN }}
+          path: _private_overlay
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run robot smoke script (push to robot-state + Telegram message)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+          ROBOT_SMOKE_TAG: ${{ inputs.tag || 'v0.21.7' }}
+          ROBOT_STATE_REMOTE: https://github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          python _private_overlay/robot/smoke.py \
+            --remote "${ROBOT_STATE_REMOTE}" \
+            --branch robot-state \
+            --tag "${ROBOT_SMOKE_TAG}"
+
+      - name: Remove _private_overlay after smoke check
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf _private_overlay
+          if [ -e _private_overlay ]; then
+            echo "::error::_private_overlay still exists after cleanup"
+            exit 1
+          fi

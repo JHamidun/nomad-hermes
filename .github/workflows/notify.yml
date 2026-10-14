@@ -1,0 +1,113 @@
+# Nomad Robot Notify Workflow (M-037b, M-232)
+# Runs in public JHamidun/nomad-hermes on ubuntu-latest:
+#   - Supports workflow_dispatch -f kind=green|red|promoted|rollback
+#   - Sends formatted notification in MSK timezone (Europe/Moscow) via _private_overlay/robot/notify.py
+#   - Fails closed if any required secret (TG_BOT_TOKEN, TG_CHAT_ID, OVERLAY_READ_TOKEN, ROBOT_PUSH_TOKEN) is missing
+
+name: Robot Notify
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Notification kind: green | red | promoted | rollback'
+        required: true
+        default: 'green'
+        type: string
+      tag:
+        description: 'Upstream or release tag'
+        required: false
+        default: 'v0.21.7'
+        type: string
+      commit:
+        description: 'Commit SHA or ref'
+        required: false
+        default: 'HEAD'
+        type: string
+      details:
+        description: 'Optional summary, failure reason, or rollback reason'
+        required: false
+        default: ''
+        type: string
+      simulate_missing_secret:
+        description: 'Optional secret name to blank out for red-path verification (TG_BOT_TOKEN, TG_CHAT_ID, ROBOT_PUSH_TOKEN, OVERLAY_READ_TOKEN)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUTF8: '1'
+
+jobs:
+  notify:
+    name: Send Robot Telegram Notification (MSK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify required robot and overlay secrets (fail-closed)
+        env:
+          OVERLAY_READ_TOKEN: ${{ secrets.OVERLAY_READ_TOKEN }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          SIMULATE_MISSING_SECRET: ${{ inputs.simulate_missing_secret }}
+        run: |
+          set -eo pipefail
+          missing=()
+          if [ "${SIMULATE_MISSING_SECRET}" = "OVERLAY_READ_TOKEN" ]; then OVERLAY_READ_TOKEN=""; fi
+          if [ "${SIMULATE_MISSING_SECRET}" = "ROBOT_PUSH_TOKEN" ]; then ROBOT_PUSH_TOKEN=""; fi
+          if [ "${SIMULATE_MISSING_SECRET}" = "TG_BOT_TOKEN" ]; then TG_BOT_TOKEN=""; fi
+          if [ "${SIMULATE_MISSING_SECRET}" = "TG_CHAT_ID" ]; then TG_CHAT_ID=""; fi
+          if [ -z "${OVERLAY_READ_TOKEN}" ]; then missing+=("OVERLAY_READ_TOKEN"); fi
+          if [ -z "${ROBOT_PUSH_TOKEN}" ]; then missing+=("ROBOT_PUSH_TOKEN"); fi
+          if [ -z "${TG_BOT_TOKEN}" ]; then missing+=("TG_BOT_TOKEN"); fi
+          if [ -z "${TG_CHAT_ID}" ]; then missing+=("TG_CHAT_ID"); fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secret(s) for notify workflow: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Checkout private nomad-overlay into temporary directory
+        uses: actions/checkout@v4
+        with:
+          repository: JHamidun/nomad-overlay
+          token: ${{ secrets.OVERLAY_READ_TOKEN }}
+          path: _private_overlay
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Send Telegram notification via robot/notify.py (MSK timezone)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          NOTIFY_KIND: ${{ inputs.kind }}
+          NOTIFY_TAG: ${{ inputs.tag || 'v0.21.7' }}
+          NOTIFY_COMMIT: ${{ inputs.commit || github.sha }}
+          NOTIFY_DETAILS: ${{ inputs.details }}
+          ROBOT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python _private_overlay/robot/notify.py \
+            --kind "${NOTIFY_KIND}" \
+            --tag "${NOTIFY_TAG}" \
+            --commit "${NOTIFY_COMMIT}" \
+            --details "${NOTIFY_DETAILS}" \
+            --run-url "${ROBOT_RUN_URL}"
+
+      - name: Remove _private_overlay after notification
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf _private_overlay
+          if [ -e _private_overlay ]; then
+            echo "::error::_private_overlay still exists after cleanup"
+            exit 1
+          fi

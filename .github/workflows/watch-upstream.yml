@@ -1,0 +1,131 @@
+# Nomad Watch-Upstream & Core Adapter Contract Workflow (M-032b, M-158, M-232)
+# Runs in public JHamidun/nomad-hermes on ubuntu-latest:
+#   - Polls NousResearch/hermes-agent tags (hourly cron or manual dispatch)
+#   - Verifies T0 patch queue against the upstream tag
+#   - Runs static gate `tools/ci_checks.py core-adapter` and live contract test
+#     `pytest tests/test_core_adapter_contract.py` against the upstream tag (M-158):
+#     any signature change, missing symbol, or moved core symbol turns the run RED.
+
+name: Watch Upstream & Adapter Contract
+
+on:
+  push:
+    tags:
+      - 'v*'
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Upstream git tag or ref to check (defaults to latest upstream tag)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUTF8: '1'
+  UPSTREAM_REPO: https://github.com/NousResearch/hermes-agent.git
+
+jobs:
+  watch-upstream:
+    name: Watch Upstream Tag & Verify Core Adapter Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Verify required robot and overlay secrets (fail-closed)
+        env:
+          OVERLAY_READ_TOKEN: ${{ secrets.OVERLAY_READ_TOKEN }}
+          ROBOT_PUSH_TOKEN: ${{ secrets.ROBOT_PUSH_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set -eo pipefail
+          missing=()
+          if [ -z "${OVERLAY_READ_TOKEN}" ]; then missing+=("OVERLAY_READ_TOKEN"); fi
+          if [ -z "${ROBOT_PUSH_TOKEN}" ]; then missing+=("ROBOT_PUSH_TOKEN"); fi
+          if [ -z "${TG_BOT_TOKEN}" ]; then missing+=("TG_BOT_TOKEN"); fi
+          if [ -z "${TG_CHAT_ID}" ]; then missing+=("TG_CHAT_ID"); fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secrets for watch-upstream workflow: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Resolve target upstream tag
+        id: resolve_tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG}" ]; then
+            target_tag="${INPUT_TAG}"
+          else
+            target_tag="$(git ls-remote --tags --refs --sort=-v:refname "${UPSTREAM_REPO}" 'v*' | head -n 1 | sed 's#.*refs/tags/##')"
+          fi
+          if [ -z "${target_tag}" ]; then
+            echo "::error::Failed to resolve upstream tag from ${UPSTREAM_REPO}"
+            exit 1
+          fi
+          echo "Resolved upstream tag: ${target_tag}"
+          echo "tag=${target_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Fetch upstream Hermes at target tag
+        env:
+          TARGET_TAG: ${{ steps.resolve_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git init -q upstream
+          git -C upstream fetch -q --depth 1 "${UPSTREAM_REPO}" "${TARGET_TAG}"
+          git -C upstream checkout -q FETCH_HEAD
+          git -C upstream log -1 --format='upstream %H %cd'
+
+      - name: Checkout private nomad-overlay into temporary directory
+        uses: actions/checkout@v4
+        with:
+          repository: JHamidun/nomad-overlay
+          token: ${{ secrets.OVERLAY_READ_TOKEN }}
+          path: _private_overlay
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install upstream Hermes and test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip PyYAML==6.0.3 pytest
+          python -m pip install -e "./upstream[web]"
+
+      - name: Run T0 patch queue check on upstream tag
+        run: |
+          set -euo pipefail
+          python _private_overlay/robot/robot.py t0 \
+            --upstream ./upstream \
+            --overlay _private_overlay
+
+      - name: Run core adapter static gate and contract test on upstream tag (M-158)
+        env:
+          NOMAD_HERMES_AGENT: ${{ github.workspace }}/upstream
+          PYTHONPATH: ${{ github.workspace }}/upstream
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/hermes-home"
+          export HERMES_HOME="$RUNNER_TEMP/hermes-home"
+          python _private_overlay/tools/ci_checks.py --root _private_overlay core-adapter
+          python -m pytest _private_overlay/tests/test_core_adapter_contract.py -v -p no:cacheprovider
+
+      - name: Remove _private_overlay after verification
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf _private_overlay
+          if [ -e _private_overlay ]; then
+            echo "::error::_private_overlay still exists after cleanup"
+            exit 1
+          fi
