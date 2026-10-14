@@ -191,6 +191,40 @@ def _kanban_observer_consumed(event: str) -> bool:
         return False
 
 
+class KanbanTaskCreateVetoed(PermissionError):
+    """Raised when a ``pre_kanban_task_create`` plugin hook vetoes task creation."""
+
+
+def _check_pre_kanban_task_create_veto(
+    *, title: str, body: Optional[str], assignee: Optional[str], board: Optional[str],
+    model_override: Optional[str], provider_override: Optional[str],
+    skills: Optional[list[str]], parents: tuple[str, ...], created_by: Optional[str],
+    tenant: Optional[str], workspace_kind: Optional[str], priority: int,
+) -> None:
+    """Run ``pre_kanban_task_create`` before opening the write txn; raise on veto."""
+    if not _kanban_observer_consumed("pre_kanban_task_create"):
+        return
+    from hermes_cli.lifecycle import invoke_hook
+
+    results = invoke_hook(
+        "pre_kanban_task_create",
+        title=title, body=body, assignee=assignee, board=board or get_current_board(),
+        model_override=model_override, provider_override=provider_override,
+        skills=list(skills) if skills else None, parents=list(parents),
+        created_by=created_by, tenant=tenant, workspace_kind=workspace_kind,
+        priority=priority, profile_name=_hook_profile_name(),
+    )
+    for item in results or ():
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("action") or item.get("decision") or "").strip().lower()
+        if action in {"veto", "block", "deny"} or bool(item.get("veto")) or bool(item.get("block")):
+            reason = str(
+                item.get("reason") or item.get("message") or "kanban task creation vetoed by plugin"
+            ).strip()
+            raise KanbanTaskCreateVetoed(reason)
+
+
 def _fire_worker_spawned_hook(
     conn: sqlite3.Connection, task: Task, workspace_path: str, pid: Optional[int], *,
     board: Optional[str] = None,
@@ -1266,6 +1300,13 @@ def create_task(
         board_default = _board_meta_for(board).get("default_workdir")
         if board_default:
             workspace_path = str(board_default)
+
+    _check_pre_kanban_task_create_veto(
+        title=title.strip(), body=body, assignee=assignee, board=board,
+        model_override=model_override, provider_override=provider_override,
+        skills=skills_list, parents=parents, created_by=created_by,
+        tenant=tenant, workspace_kind=workspace_kind, priority=priority,
+    )
 
     # Retry once on the extremely unlikely id collision.
     for attempt in range(2):
