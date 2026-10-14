@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "current_main": "v0.21.7",
+  "tags": [
+    {
+      "ru_review_date": "2026-10-14",
+      "status": "green",
+      "upstream_commit": "71d34bad1045610252eda02ee79549436896e784",
+      "nomad_commit": "87187584eb11661717f6ea2868ed2cbdb6e09321",
+      "nomad_tag": "v0.21.7-nomad",
+      "candidate_since": "2026-10-12T12:00:00+03:00",
+      "tag": "v0.21.7",
+      "ru_review_by": "JHamidun",
+      "tree_oid": "6f61f91544ee9f3a37866664461d9454586a2f2e",
+      "promoted_at": "2026-10-14T16:30:00+03:00"
+    }
+  ]
+}
